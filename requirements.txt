@@ -1,0 +1,9 @@
+aiohttp
+requests
+pytz
+celery==5.4.0
+dotenv
+uvicorn
+redis
+aioredis
+pytz

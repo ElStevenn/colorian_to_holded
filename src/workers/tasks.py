@@ -1,0 +1,14 @@
+from celery import shared_task
+from src.services.sync_service import AsyncService 
+import asyncio
+
+
+@shared_task
+def main_periodic_tasks():
+    """Runs every 24 hours."""
+    async_service = AsyncService()
+    asyncio.run(holded_to_cegid(async_service))
+
+async def holded_to_cegid(async_service: AsyncService) -> int:
+    print("Runnign holded_to_cegid service")
+    
