@@ -1,5 +1,8 @@
+import unicodedata, re
 import json
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 """
  Holded API documentation: https://developers.holded.com/reference/documents
@@ -11,12 +14,26 @@ import os
 CREDENTIALS_FILE = os.path.join(os.path.dirname(__file__), "credentials.json")
 
 def load_credentials() -> dict:
-    with open(CREDENTIALS_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(CREDENTIALS_FILE, "r") as f:
+            return json.load(f)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"Credentials file not found at {CREDENTIALS_FILE}. Please create it with the required structure.")
+    except json.JSONDecodeError as e:
+        raise ValueError(f"Invalid JSON in credentials file: {e}")
 
 def save_credentials(data: dict) -> None:
-    with open(CREDENTIALS_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+    """Save credentials to file. In Azure Functions, this will fail gracefully due to read-only filesystem."""
+    try:
+        with open(CREDENTIALS_FILE, "w") as f:
+            json.dump(data, f, indent=4)
+    except (OSError, PermissionError) as e:
+        # Azure Functions have read-only filesystem, so token persistence will fail
+        # This is expected and the function should continue without persisting tokens
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"⚠️  Could not persist credentials (read-only filesystem): {e}")
+        logger.info("🔄 Tokens will be refreshed on next function execution")
 
 credentials = load_credentials()
 CLORIAN_ACCOUNTS = credentials["clorian_accounts"]
@@ -48,13 +65,18 @@ def update_refresh_token(clorian_account: str, new_token: str) -> None:
             return
     raise ValueError(f"Clorian account '{clorian_account}' not found")
 
-
 def get_refresh_token(clorian_account: str) -> str:
     """Retrieve the current long-lived refresh token."""
     for acc in CLORIAN_ACCOUNTS:
         if acc.get("name") == clorian_account:
             return acc.get("refresh_token", "")
     return ""
+
+def get_clorian_account(clorian_account: str) -> dict:
+    for acc in CLORIAN_ACCOUNTS:
+        if acc.get("name") == clorian_account:
+            return acc
+    raise ValueError(f"Clorian account '{clorian_account}' not found")
 
 # OFFSET HELPERS
 def set_offset(clorian_account: str, offset: int, account_type: str = "general") -> None:
@@ -67,7 +89,7 @@ def set_offset(clorian_account: str, offset: int, account_type: str = "general")
 def increment_offset(clorian_account: str, account_type: str = "general", persist: bool = False) -> int:
     """
     Increments the offset and returns the new value.
-    If persist=True, writes the updated credentials back to disk.
+    If persist=True, writes the updated credentials back to disk (may fail in Azure Functions).
     """
     for acc in CLORIAN_ACCOUNTS:
         if acc["name"] == clorian_account and account_type in acc["cuentas_a_migrar"]:
@@ -75,7 +97,7 @@ def increment_offset(clorian_account: str, account_type: str = "general", persis
             acc["offset_cuentas_a_migrar"][idx] += 1
             new_val = acc["offset_cuentas_a_migrar"][idx]
             if persist:
-                save_credentials(credentials)
+                save_credentials(credentials)  # Will fail gracefully in Azure Functions
             return new_val
     return 0  # account or type not found
 
@@ -86,6 +108,12 @@ def get_offset(clorian_account: str, account_type: str = "general") -> int:
             return acc["offset_cuentas_a_migrar"][idx]
     return 0
 
+
+# UTILS
+def _clean(text: str, max_len: int | None = None) -> str:
+    txt = unicodedata.normalize("NFKD", text or "").encode("ascii","ignore").decode()
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt[:max_len] if max_len else txt
 
 
 if __name__ == "__main__":

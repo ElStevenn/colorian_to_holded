@@ -8,3 +8,5 @@ __pycache__
 
 src/venv
 src/config/credentials.json
+
+venv
